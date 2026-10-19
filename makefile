@@ -1,5 +1,5 @@
-NAME = QCHECK
-DESCRIPTION = "Native execution check"
+NAME = QGFX
+DESCRIPTION = "Graphics isolation test"
 COMPRESSED = NO
 ARCHIVED = NO
 
