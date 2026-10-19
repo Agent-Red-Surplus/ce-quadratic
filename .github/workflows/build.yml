@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Download repository
         uses: actions/checkout@v4
+      - name: Run host tests
+        run: python3 tests/run_host_tests.py
 
       - name: Download and configure official CE compiler
         shell: bash
