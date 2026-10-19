@@ -17,13 +17,50 @@ jobs:
       - name: Download repository
         uses: actions/checkout@v4
 
-      - name: Install CE compiler on remote runner
-        uses: gavinhsmith/setup-ti84-ce-toolchain@v1
-        with:
-          version: v15.0
+      - name: Download and configure official CE compiler
+        shell: bash
+        run: |
+          set -euo pipefail
 
-      - name: Build program
-        run: make
+          curl --fail --location --retry 3 \
+            "https://github.com/CE-Programming/toolchain/releases/download/v15.0/CEdev-Linux.tar.gz" \
+            --output "$RUNNER_TEMP/CEdev-Linux.tar.gz"
+
+          mkdir -p "$RUNNER_TEMP/ce-toolchain"
+
+          tar -xzf "$RUNNER_TEMP/CEdev-Linux.tar.gz" \
+            -C "$RUNNER_TEMP/ce-toolchain"
+
+          CONFIG="$(find "$RUNNER_TEMP/ce-toolchain" \
+            -type f -name cedev-config -print -quit)"
+
+          if [ -z "$CONFIG" ]; then
+            echo "::error::cedev-config was not found in the compiler archive."
+            find "$RUNNER_TEMP/ce-toolchain" -maxdepth 3 -type f
+            exit 1
+          fi
+
+          BIN_DIR="$(dirname "$CONFIG")"
+          CEDEV_DIR="$(dirname "$BIN_DIR")"
+
+          echo "$BIN_DIR" >> "$GITHUB_PATH"
+          echo "CEDEV=$CEDEV_DIR" >> "$GITHUB_ENV"
+
+          echo "Compiler directory: $CEDEV_DIR"
+          ls -l "$BIN_DIR"
+
+      - name: Check compiler configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v cedev-config
+          cedev-config --makefile
+
+      - name: Build QSTART
+        shell: bash
+        run: |
+          set -euo pipefail
+          make
 
       - name: Save calculator executable
         uses: actions/upload-artifact@v4
