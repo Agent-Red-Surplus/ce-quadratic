@@ -1,5 +1,5 @@
-NAME = QLOG
-DESCRIPTION = "Persistent logging test"
+NAME = QFORM
+DESCRIPTION = "Exact answer display test"
 COMPRESSED = NO
 ARCHIVED = NO
 
