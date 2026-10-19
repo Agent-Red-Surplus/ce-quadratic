@@ -4,7 +4,7 @@
 int main(void)
 {
     gfx_Begin();
-    gfx_SetDrawScreen();
+    gfx_SetDrawBuffer();
 
     gfx_FillScreen(255);
 
@@ -25,6 +25,7 @@ int main(void)
     gfx_Circle(160, 132, 12);
 
     gfx_PrintStringXY("Press any key to exit.", 16, 200);
+    gfx_BlitBuffer();
 
     while (os_GetCSC()) {
     }
