@@ -1,5 +1,5 @@
-NAME = QUADAPP
-DESCRIPTION = "Exact quadratic solver"
+NAME = ALGEBRA
+DESCRIPTION = "Honors Algebra 2 Suite"
 COMPRESSED = NO
 ARCHIVED = NO
 
