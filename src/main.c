@@ -33,47 +33,37 @@ static root_t roots[2];
 static unsigned root_count;
 static bool all_numbers, repeated;
 
-static int32_t abs32(int32_t value)
-{
-    return value < 0 ? -value : value;
-}
+static int32_t abs32(int32_t v) { return v < 0 ? -v : v; }
 
 static int32_t gcd32(int32_t a, int32_t b)
 {
-    int32_t remainder;
+    int32_t t;
     a = abs32(a);
     b = abs32(b);
-    while (b != 0) {
-        remainder = a % b;
-        a = b;
-        b = remainder;
-    }
+    while (b) { t = a % b; a = b; b = t; }
     return a;
 }
 
 static bool read_log(log_record_t *record)
 {
-    uint8_t handle = ti_Open(LOG_NAME, "r");
+    uint8_t h = ti_Open(LOG_NAME, "r");
     bool ok;
     int closed;
-    if (!handle) return false;
-    ok = ti_Read(record, sizeof(*record), 1, handle) == 1;
-    closed = ti_Close(handle);
+    if (!h) return false;
+    ok = ti_Read(record, sizeof(*record), 1, h) == 1;
+    closed = ti_Close(h);
     return ok && closed != 0 && record->magic == LOG_MAGIC;
 }
 
 static bool save_log(void)
 {
     log_record_t check = {0};
-    uint8_t handle = ti_Open(LOG_NAME, "w");
+    uint8_t h = ti_Open(LOG_NAME, "w");
     bool ok;
     int closed;
-    if (!handle) {
-        log_ok = false;
-        return false;
-    }
-    ok = ti_Write(&log_data, sizeof(log_data), 1, handle) == 1;
-    closed = ti_Close(handle);
+    if (!h) { log_ok = false; return false; }
+    ok = ti_Write(&log_data, sizeof(log_data), 1, h) == 1;
+    closed = ti_Close(h);
     if (!ok || closed == 0 || !read_log(&check)) {
         log_ok = false;
         return false;
@@ -99,7 +89,7 @@ static void begin_screen(void)
     gfx_SetTextFGColor(0);
     gfx_SetTextBGColor(255);
     gfx_SetTextScale(1, 1);
-    /* Keep the default text configuration, as in working QFORM. */
+    /* Preserve the default text renderer used by working QFORM. */
 }
 
 static void page(const char *title)
@@ -139,16 +129,13 @@ static bool parse_number(const char *text, int32_t *value)
     int32_t magnitude = 0;
     unsigned i = 0;
     bool negative = false;
-    if (text[0] == '\0') {
-        *value = 0;
-        return true;
-    }
+    if (!text[0]) { *value = 0; return true; }
     if (text[0] == '-') {
         negative = true;
         i = 1;
-        if (text[i] == '\0') return false;
+        if (!text[i]) return false;
     }
-    for (; text[i] != '\0'; ++i) {
+    for (; text[i]; ++i) {
         if (text[i] < '0' || text[i] > '9') return false;
         magnitude = magnitude * 10L + (text[i] - '0');
         if (magnitude > LIMIT) return false;
@@ -180,65 +167,86 @@ static void diagnostics(void)
     gfx_PrintStringXY(text, 12, 124);
     gfx_PrintStringXY(log_ok ? "Log write/read-back: OK"
                             : "E101: LOG STORAGE FAILURE", 12, 148);
-    gfx_PrintStringXY("20=input, 30=solved, 40=layout", 12, 172);
-    gfx_PrintStringXY("Error 201: invalid coefficient", 12, 190);
-    gfx_PrintStringXY("ENTER or CLEAR: return", 12, 220);
+    gfx_PrintStringXY("20=input  30=solved  40=layout", 12, 170);
+    gfx_PrintStringXY("201=input  301=answer too wide", 12, 188);
+    gfx_HorizLine(12, 207, 296);
+    gfx_PrintStringXY("ENTER or CLEAR: back", 12, 220);
     gfx_BlitBuffer();
     do { key = wait_key(); }
-    while (key != sk_Enter && key != sk_Clear);
+    while (key != sk_Enter && key != sk_Clear && key != sk_Mode);
+}
+
+static void input_help(unsigned selected)
+{
+    gfx_HorizLine(12, 188, 296);
+    gfx_PrintStringXY(selected == 2
+        ? "ENTER Solve     UP/DOWN Select"
+        : "ENTER Next      UP/DOWN Select", 12, 199);
+    gfx_PrintStringXY("DEL Erase       CLEAR Clear field", 12, 212);
+    gfx_PrintStringXY("(-) Sign    MODE Logs    Y= Quit", 12, 225);
 }
 
 static void draw_input(char fields[3][8], unsigned selected,
-                       const char *message)
+                       bool replace, const char *message)
 {
     unsigned i;
     char text[64];
     page("QUADAPP / EXACT ROOTS");
-    gfx_PrintStringXY("A*x^2 + B*x + C = 0", 12, 44);
-    gfx_PrintStringXY("Integers: -1000 through 1000", 12, 62);
+    gfx_PrintStringXY("A*x^2 + B*x + C = 0", 12, 42);
+    gfx_PrintStringXY("Integer coefficients: -1000 to 1000", 12, 59);
     for (i = 0; i < 3; ++i) {
-        int y = 88 + (int)i * 30;
-        snprintf(text, sizeof(text), "%c = %s", (char)('A' + i),
-                 fields[i][0] ? fields[i] : "0");
-        if (i == selected) gfx_Rectangle(8, y - 6, 304, 24);
-        gfx_PrintStringXY(text, 18, y);
+        int y = 84 + (int)i * 30;
+        const char *value = fields[i][0] ? fields[i] : "0";
+        snprintf(text, sizeof(text), "%c = %s", (char)('A' + i), value);
+        if (i == selected) {
+            gfx_Rectangle(8, y - 7, 304, 25);
+            gfx_PrintStringXY(">", 16, y);
+            if (replace) {
+                int w = gfx_GetStringWidth(value);
+                gfx_HorizLine(60, y + 11, w);
+            }
+        }
+        gfx_PrintStringXY(text, 28, y);
     }
-    gfx_PrintStringXY(message, 12, 179);
-    gfx_PrintStringXY("ENTER: next/solve  GRAPH: solve", 12, 198);
-    gfx_PrintStringXY("DEL: erase  +/-: sign  UP/DN: field", 12, 212);
-    gfx_PrintStringXY("MODE: logs  CLEAR: exit", 12, 226);
+    gfx_PrintStringXY(message, 12, 173);
+    input_help(selected);
     gfx_BlitBuffer();
 }
 
 static bool input_coefficients(char fields[3][8], unsigned *selected)
 {
-    const char *message = "Blank fields mean zero.";
+    const char *message = "Type to replace. GRAPH also solves.";
+    bool replace = true;
     for (;;) {
         uint8_t key;
         int digit;
         size_t length;
         char *field;
-        draw_input(fields, *selected, message);
+        draw_input(fields, *selected, replace, message);
         key = wait_key();
-        message = "Blank fields mean zero.";
+        message = replace ? "Type to replace. GRAPH also solves."
+                          : "Blank field = 0. GRAPH also solves.";
         field = fields[*selected];
         length = strlen(field);
         digit = key_digit(key);
-        if (key == sk_Clear) return false;
-        if (key == sk_Mode) {
-            diagnostics();
+        if (key == sk_Yequ) return false;
+        if (key == sk_Mode) { diagnostics(); continue; }
+        if (key == sk_Up || key == sk_Down) {
+            *selected = (*selected + (key == sk_Up ? 2 : 1)) % 3;
+            replace = true;
+            message = "Type to replace. GRAPH also solves.";
             continue;
         }
-        if (key == sk_Up) {
-            *selected = (*selected + 2) % 3;
-            continue;
-        }
-        if (key == sk_Down) {
-            *selected = (*selected + 1) % 3;
+        if (key == sk_Clear) {
+            field[0] = '\0';
+            replace = false;
+            message = "Field cleared. Blank field = 0.";
             continue;
         }
         if (key == sk_Del) {
             if (length) field[length - 1] = '\0';
+            replace = false;
+            message = "Editing: digits append to this field.";
             continue;
         }
         if (key == sk_Chs || key == sk_Sub) {
@@ -248,10 +256,17 @@ static bool input_coefficients(char fields[3][8], unsigned *selected)
                 memmove(field + 1, field, length + 1);
                 field[0] = '-';
             }
+            replace = false;
+            message = "Sign changed. Type digits to append.";
             continue;
         }
         if (digit >= 0) {
             int32_t value;
+            if (replace) {
+                field[0] = '\0';
+                length = 0;
+                replace = false;
+            }
             if (length >= 6) {
                 message = "Maximum magnitude is 1000.";
                 continue;
@@ -261,21 +276,25 @@ static bool input_coefficients(char fields[3][8], unsigned *selected)
             if (!parse_number(field, &value)) {
                 field[length] = '\0';
                 message = "Maximum magnitude is 1000.";
+            } else {
+                message = "Editing: digits append to this field.";
             }
             continue;
         }
         if (key == sk_Enter && *selected < 2) {
             ++*selected;
+            replace = true;
+            message = "Type to replace. GRAPH also solves.";
             continue;
         }
         if (key == sk_Enter || key == sk_Graph) {
             int32_t values[3];
             unsigned i;
-            for (i = 0; i < 3; ++i) {
+            for (i = 0; i < 3; ++i)
                 if (!parse_number(fields[i], &values[i])) break;
-            }
             if (i != 3) {
                 *selected = i;
+                replace = false;
                 message = "Enter digits after the minus sign.";
                 log_data.error = 201;
                 continue;
@@ -311,9 +330,8 @@ static void solve(void)
     all_numbers = false;
     repeated = false;
     if (a == 0) {
-        if (b == 0) {
-            all_numbers = c == 0;
-        } else {
+        if (b == 0) all_numbers = c == 0;
+        else {
             roots[0] = rational_root(-c, b);
             root_count = 1;
         }
@@ -327,9 +345,8 @@ static void solve(void)
     if (d >= 0 && square_root * square_root == d) {
         roots[0] = rational_root(-b + square_root, 2L * a);
         root_count = 1;
-        if (square_root == 0) {
-            repeated = true;
-        } else {
+        if (square_root == 0) repeated = true;
+        else {
             roots[1] = rational_root(-b - square_root, 2L * a);
             root_count = 2;
         }
@@ -357,47 +374,38 @@ static void solve(void)
     root_count = 2;
 }
 
-static void prepare_expression(const root_t *root,
-                               expression_t *expression)
+static void prepare_expression(const root_t *root, expression_t *e)
 {
     char coefficient[16] = "", real_part[16] = "";
     const char *sign = "";
     const char *imaginary = root->imaginary ? "i" : "";
     int32_t factor = abs32(root->f);
     int denominator_width;
-    memset(expression, 0, sizeof(*expression));
-    expression->fraction = root->q != 1;
-    expression->radical = root->radical && root->r != 1;
-    snprintf(expression->denominator, sizeof(expression->denominator),
-             "%ld", (long)root->q);
+    memset(e, 0, sizeof(*e));
+    e->fraction = root->q != 1;
+    e->radical = root->radical && root->r != 1;
+    snprintf(e->denominator, sizeof(e->denominator), "%ld", (long)root->q);
     if (!root->radical) {
-        snprintf(expression->lead, sizeof(expression->lead),
-                 "%ld", (long)root->p);
+        snprintf(e->lead, sizeof(e->lead), "%ld", (long)root->p);
     } else {
         if (root->p != 0) {
             snprintf(real_part, sizeof(real_part), "%ld", (long)root->p);
             sign = root->f < 0 ? "-" : "+";
-        } else {
-            sign = root->f < 0 ? "-" : "";
-        }
+        } else sign = root->f < 0 ? "-" : "";
         if (factor != 1)
             snprintf(coefficient, sizeof(coefficient), "%ld", (long)factor);
-        snprintf(expression->lead, sizeof(expression->lead), "%s%s%s%s",
+        snprintf(e->lead, sizeof(e->lead), "%s%s%s%s",
                  real_part, sign, coefficient, imaginary);
-        if (expression->radical)
-            snprintf(expression->radicand, sizeof(expression->radicand),
-                     "%ld", (long)root->r);
+        if (e->radical)
+            snprintf(e->radicand, sizeof(e->radicand), "%ld", (long)root->r);
     }
-    expression->numerator_width = gfx_GetStringWidth(expression->lead);
-    if (expression->radical)
-        expression->numerator_width +=
-            17 + gfx_GetStringWidth(expression->radicand);
-    expression->width = expression->numerator_width;
-    if (expression->fraction) {
-        denominator_width = gfx_GetStringWidth(expression->denominator);
-        if (denominator_width > expression->width)
-            expression->width = denominator_width;
-        expression->width += 8;
+    e->numerator_width = gfx_GetStringWidth(e->lead);
+    if (e->radical) e->numerator_width += 17 + gfx_GetStringWidth(e->radicand);
+    e->width = e->numerator_width;
+    if (e->fraction) {
+        denominator_width = gfx_GetStringWidth(e->denominator);
+        if (denominator_width > e->width) e->width = denominator_width;
+        e->width += 8;
     }
 }
 
@@ -410,21 +418,17 @@ static void draw_radical(int x, int y, const char *digits)
     gfx_HorizLine(x + 8, y - 3, width + 7);
 }
 
-static void draw_expression(const expression_t *expression,
-                            int x, int middle)
+static void draw_expression(const expression_t *e, int x, int middle)
 {
-    int y = expression->fraction ? middle - 14 : middle;
-    int numerator_x = x +
-        (expression->width - expression->numerator_width) / 2;
-    gfx_PrintStringXY(expression->lead, numerator_x, y);
-    if (expression->radical)
-        draw_radical(numerator_x + gfx_GetStringWidth(expression->lead),
-                     y, expression->radicand);
-    if (expression->fraction) {
-        int width = gfx_GetStringWidth(expression->denominator);
-        gfx_HorizLine(x, middle + 1, expression->width);
-        gfx_PrintStringXY(expression->denominator,
-                         x + (expression->width - width) / 2,
+    int y = e->fraction ? middle - 14 : middle;
+    int nx = x + (e->width - e->numerator_width) / 2;
+    gfx_PrintStringXY(e->lead, nx, y);
+    if (e->radical)
+        draw_radical(nx + gfx_GetStringWidth(e->lead), y, e->radicand);
+    if (e->fraction) {
+        int width = gfx_GetStringWidth(e->denominator);
+        gfx_HorizLine(x, middle + 1, e->width);
+        gfx_PrintStringXY(e->denominator, x + (e->width - width) / 2,
                          middle + 10);
     }
 }
@@ -447,7 +451,7 @@ static bool show_results(void)
         gfx_PrintStringXY(text, 12, 44);
         if (!fits) {
             gfx_PrintStringXY("E301: answer exceeds display width", 12, 88);
-        } else if (root_count == 0) {
+        } else if (!root_count) {
             gfx_PrintStringXY(all_numbers ? "ALL COMPLEX NUMBERS"
                                          : "NO SOLUTION", 12, 88);
         } else if (root_count == 1) {
@@ -463,19 +467,22 @@ static bool show_results(void)
                 draw_expression(&expressions[1], x + 18, 100);
             } else {
                 draw_expression(&expressions[0], 12, 86);
-                gfx_PrintStringXY(",", 18 + expressions[0].width, 86);
+                if (expressions[0].width <= 282)
+                    gfx_PrintStringXY(",", 18 + expressions[0].width, 86);
+                else gfx_PrintStringXY(",", 12, 116);
                 draw_expression(&expressions[1], 12, 150);
             }
         }
         gfx_PrintStringXY(log_ok ? "Diagnostic storage: OK"
-                                : "E101: diagnostic storage failed", 12, 190);
-        gfx_PrintStringXY("ENTER: edit coefficients", 12, 208);
-        gfx_PrintStringXY("MODE: logs  CLEAR: exit", 12, 224);
+                                : "E101: diagnostic storage failed", 12, 184);
+        gfx_HorizLine(12, 201, 296);
+        gfx_PrintStringXY("ENTER or CLEAR: edit coefficients", 12, 212);
+        gfx_PrintStringXY("MODE: logs                 Y=: quit", 12, 226);
         gfx_BlitBuffer();
         key = wait_key();
         if (key == sk_Mode) diagnostics();
-        else if (key == sk_Enter) return true;
-        else if (key == sk_Clear) return false;
+        else if (key == sk_Enter || key == sk_Clear) return true;
+        else if (key == sk_Yequ) return false;
     }
 }
 
@@ -508,9 +515,9 @@ int main(void)
         {
             unsigned i;
             for (i = 0; i < root_count; ++i) {
-                expression_t expression;
-                prepare_expression(&roots[i], &expression);
-                if (expression.width > 296) log_data.error = 301;
+                expression_t e;
+                prepare_expression(&roots[i], &e);
+                if (e.width > 296) log_data.error = 301;
             }
         }
         gfx_End();
@@ -519,6 +526,7 @@ int main(void)
         begin_screen();
         running = show_results();
         gfx_End();
+        selected = 0;
     }
     log_data.clean_exit = 1;
     save_log();
