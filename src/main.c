@@ -5,17 +5,26 @@
 #include <stdio.h>
 #include <string.h>
 
+#define APP_VERSION "0.2.0"
 #define LIMIT 1000L
 
 typedef struct {
-    int32_t p, q, f, r;
-    bool imaginary, radical;
+    int32_t p;
+    int32_t q;
+    int32_t f;
+    int32_t r;
+    bool imaginary;
+    bool radical;
 } root_t;
 
 typedef struct {
-    char lead[32], radicand[16], denominator[16];
-    bool radical, fraction;
-    int numerator_width, width;
+    char lead[32];
+    char radicand[16];
+    char denominator[16];
+    bool radical;
+    bool fraction;
+    int numerator_width;
+    int width;
 } expression_t;
 
 static int32_t coefficient_a;
@@ -26,6 +35,12 @@ static root_t roots[2];
 static unsigned root_count;
 static bool all_numbers;
 static bool repeated;
+
+static char coefficient_fields[3][8] = {
+    "",
+    "",
+    ""
+};
 
 static int32_t abs32(int32_t value)
 {
@@ -82,38 +97,17 @@ static uint8_t wait_key(void)
 static int key_digit(uint8_t key)
 {
     switch (key) {
-        case sk_0:
-            return 0;
-
-        case sk_1:
-            return 1;
-
-        case sk_2:
-            return 2;
-
-        case sk_3:
-            return 3;
-
-        case sk_4:
-            return 4;
-
-        case sk_5:
-            return 5;
-
-        case sk_6:
-            return 6;
-
-        case sk_7:
-            return 7;
-
-        case sk_8:
-            return 8;
-
-        case sk_9:
-            return 9;
-
-        default:
-            return -1;
+        case sk_0: return 0;
+        case sk_1: return 1;
+        case sk_2: return 2;
+        case sk_3: return 3;
+        case sk_4: return 4;
+        case sk_5: return 5;
+        case sk_6: return 6;
+        case sk_7: return 7;
+        case sk_8: return 8;
+        case sk_9: return 9;
+        default: return -1;
     }
 }
 
@@ -154,12 +148,10 @@ static bool parse_number(
     }
 
     *value = negative ? -magnitude : magnitude;
-
     return true;
 }
 
 static void draw_input(
-    char fields[3][8],
     unsigned selected,
     bool replace,
     const char *message
@@ -168,7 +160,7 @@ static void draw_input(
     unsigned i;
     char text[64];
 
-    page("QUADAPP / EXACT ROOTS");
+    page("ALGEBRA / QUADRATIC + LINEAR");
 
     gfx_PrintStringXY(
         "A*x^2 + B*x + C = 0",
@@ -186,7 +178,9 @@ static void draw_input(
         int y = 84 + (int)i * 30;
 
         const char *value =
-            fields[i][0] ? fields[i] : "0";
+            coefficient_fields[i][0]
+                ? coefficient_fields[i]
+                : "0";
 
         snprintf(
             text,
@@ -197,18 +191,8 @@ static void draw_input(
         );
 
         if (i == selected) {
-            gfx_Rectangle(
-                8,
-                y - 7,
-                304,
-                25
-            );
-
-            gfx_PrintStringXY(
-                ">",
-                16,
-                y
-            );
+            gfx_Rectangle(8, y - 7, 304, 25);
+            gfx_PrintStringXY(">", 16, y);
 
             if (replace) {
                 gfx_HorizLine(
@@ -219,24 +203,11 @@ static void draw_input(
             }
         }
 
-        gfx_PrintStringXY(
-            text,
-            28,
-            y
-        );
+        gfx_PrintStringXY(text, 28, y);
     }
 
-    gfx_PrintStringXY(
-        message,
-        12,
-        173
-    );
-
-    gfx_HorizLine(
-        12,
-        188,
-        296
-    );
+    gfx_PrintStringXY(message, 12, 173);
+    gfx_HorizLine(12, 188, 296);
 
     gfx_PrintStringXY(
         selected == 2
@@ -253,7 +224,7 @@ static void draw_input(
     );
 
     gfx_PrintStringXY(
-        "(-) Sign    GRAPH Solve    Y= Quit",
+        "(-) Sign    GRAPH Solve    Y= Menu",
         12,
         225
     );
@@ -261,10 +232,7 @@ static void draw_input(
     gfx_BlitBuffer();
 }
 
-static bool input_coefficients(
-    char fields[3][8],
-    unsigned *selected
-)
+static bool input_coefficients(unsigned *selected)
 {
     const char *message =
         "Type to replace. Blank field = 0.";
@@ -277,12 +245,7 @@ static bool input_coefficients(
         size_t length;
         char *field;
 
-        draw_input(
-            fields,
-            *selected,
-            replace,
-            message
-        );
+        draw_input(*selected, replace, message);
 
         key = wait_key();
 
@@ -290,7 +253,7 @@ static bool input_coefficients(
             ? "Type to replace. Blank field = 0."
             : "Editing: digits append to this field.";
 
-        field = fields[*selected];
+        field = coefficient_fields[*selected];
         length = strlen(field);
         digit = key_digit(key);
 
@@ -305,20 +268,14 @@ static bool input_coefficients(
             ) % 3;
 
             replace = true;
-
-            message =
-                "Type to replace. Blank field = 0.";
-
+            message = "Type to replace. Blank field = 0.";
             continue;
         }
 
         if (key == sk_Clear) {
             field[0] = '\0';
             replace = false;
-
-            message =
-                "Field cleared. Blank field = 0.";
-
+            message = "Field cleared. Blank field = 0.";
             continue;
         }
 
@@ -328,35 +285,20 @@ static bool input_coefficients(
             }
 
             replace = false;
-
-            message =
-                "Editing: digits append to this field.";
-
+            message = "Editing: digits append to this field.";
             continue;
         }
 
         if (key == sk_Chs || key == sk_Sub) {
             if (field[0] == '-') {
-                memmove(
-                    field,
-                    field + 1,
-                    length
-                );
+                memmove(field, field + 1, length);
             } else if (length < 6) {
-                memmove(
-                    field + 1,
-                    field,
-                    length + 1
-                );
-
+                memmove(field + 1, field, length + 1);
                 field[0] = '-';
             }
 
             replace = false;
-
-            message =
-                "Sign changed. Type digits to append.";
-
+            message = "Sign changed. Type digits to append.";
             continue;
         }
 
@@ -370,25 +312,18 @@ static bool input_coefficients(
             }
 
             if (length >= 6) {
-                message =
-                    "Maximum magnitude is 1000.";
-
+                message = "Maximum magnitude is 1000.";
                 continue;
             }
 
-            field[length] =
-                (char)('0' + digit);
-
+            field[length] = (char)('0' + digit);
             field[length + 1] = '\0';
 
             if (!parse_number(field, &value)) {
                 field[length] = '\0';
-
-                message =
-                    "Maximum magnitude is 1000.";
+                message = "Maximum magnitude is 1000.";
             } else {
-                message =
-                    "Editing: digits append to this field.";
+                message = "Editing: digits append to this field.";
             }
 
             continue;
@@ -397,10 +332,7 @@ static bool input_coefficients(
         if (key == sk_Enter && *selected < 2) {
             ++*selected;
             replace = true;
-
-            message =
-                "Type to replace. Blank field = 0.";
-
+            message = "Type to replace. Blank field = 0.";
             continue;
         }
 
@@ -410,7 +342,7 @@ static bool input_coefficients(
 
             for (i = 0; i < 3; ++i) {
                 if (!parse_number(
-                    fields[i],
+                    coefficient_fields[i],
                     &values[i]
                 )) {
                     break;
@@ -420,10 +352,7 @@ static bool input_coefficients(
             if (i != 3) {
                 *selected = i;
                 replace = false;
-
-                message =
-                    "Enter digits after the minus sign.";
-
+                message = "Enter digits after the minus sign.";
                 continue;
             }
 
@@ -436,10 +365,7 @@ static bool input_coefficients(
     }
 }
 
-static root_t rational_root(
-    int32_t p,
-    int32_t q
-)
+static root_t rational_root(int32_t p, int32_t q)
 {
     root_t result = {0};
     int32_t divisor;
@@ -473,11 +399,7 @@ static void solve(void)
     int32_t q;
     int32_t divisor;
 
-    memset(
-        roots,
-        0,
-        sizeof(roots)
-    );
+    memset(roots, 0, sizeof(roots));
 
     root_count = 0;
     all_numbers = false;
@@ -487,11 +409,7 @@ static void solve(void)
         if (b == 0) {
             all_numbers = c == 0;
         } else {
-            roots[0] = rational_root(
-                -c,
-                b
-            );
-
+            roots[0] = rational_root(-c, b);
             root_count = 1;
         }
 
@@ -535,11 +453,7 @@ static void solve(void)
 
     remainder = magnitude;
 
-    for (
-        i = 2;
-        i * i <= remainder;
-        ++i
-    ) {
+    for (i = 2; i * i <= remainder; ++i) {
         while (remainder % (i * i) == 0) {
             remainder /= i * i;
             factor *= i;
@@ -554,16 +468,12 @@ static void solve(void)
         q = -q;
     }
 
-    divisor = gcd32(
-        gcd32(p, factor),
-        q
-    );
+    divisor = gcd32(gcd32(p, factor), q);
 
     roots[0].p = p / divisor;
     roots[0].q = q / divisor;
     roots[0].f = factor / divisor;
     roots[0].r = remainder;
-
     roots[0].imaginary = d < 0;
     roots[0].radical = true;
 
@@ -582,22 +492,15 @@ static void prepare_expression(
     char real_part[16] = "";
 
     const char *sign = "";
-
     const char *imaginary =
         root->imaginary ? "i" : "";
 
     int32_t factor = abs32(root->f);
     int denominator_width;
 
-    memset(
-        expression,
-        0,
-        sizeof(*expression)
-    );
+    memset(expression, 0, sizeof(*expression));
 
-    expression->fraction =
-        root->q != 1;
-
+    expression->fraction = root->q != 1;
     expression->radical =
         root->radical && root->r != 1;
 
@@ -624,11 +527,9 @@ static void prepare_expression(
                 (long)root->p
             );
 
-            sign =
-                root->f < 0 ? "-" : "+";
+            sign = root->f < 0 ? "-" : "+";
         } else {
-            sign =
-                root->f < 0 ? "-" : "";
+            sign = root->f < 0 ? "-" : "";
         }
 
         if (factor != 1) {
@@ -665,27 +566,17 @@ static void prepare_expression(
 
     if (expression->radical) {
         expression->numerator_width +=
-            17 +
-            gfx_GetStringWidth(
-                expression->radicand
-            );
+            17 + gfx_GetStringWidth(expression->radicand);
     }
 
-    expression->width =
-        expression->numerator_width;
+    expression->width = expression->numerator_width;
 
     if (expression->fraction) {
         denominator_width =
-            gfx_GetStringWidth(
-                expression->denominator
-            );
+            gfx_GetStringWidth(expression->denominator);
 
-        if (
-            denominator_width >
-            expression->width
-        ) {
-            expression->width =
-                denominator_width;
+        if (denominator_width > expression->width) {
+            expression->width = denominator_width;
         }
 
         expression->width += 8;
@@ -698,34 +589,14 @@ static void draw_radical(
     const char *digits
 )
 {
-    int width =
-        gfx_GetStringWidth(digits);
+    int width = gfx_GetStringWidth(digits);
 
-    gfx_PrintStringXY(
-        digits,
-        x + 12,
-        y
-    );
+    gfx_PrintStringXY(digits, x + 12, y);
 
-    gfx_Line(
-        x,
-        y + 5,
-        x + 3,
-        y + 8
-    );
+    gfx_Line(x, y + 5, x + 3, y + 8);
+    gfx_Line(x + 3, y + 8, x + 8, y - 3);
 
-    gfx_Line(
-        x + 3,
-        y + 8,
-        x + 8,
-        y - 3
-    );
-
-    gfx_HorizLine(
-        x + 8,
-        y - 3,
-        width + 7
-    );
+    gfx_HorizLine(x + 8, y - 3, width + 7);
 }
 
 static void draw_expression(
@@ -752,9 +623,7 @@ static void draw_expression(
     if (expression->radical) {
         draw_radical(
             numerator_x +
-                gfx_GetStringWidth(
-                    expression->lead
-                ),
+                gfx_GetStringWidth(expression->lead),
             y,
             expression->radicand
         );
@@ -799,7 +668,7 @@ static bool show_results(void)
     }
 
     for (;;) {
-        page("QUADAPP / EXACT SOLUTIONS");
+        page("ALGEBRA / EXACT SOLUTIONS");
 
         snprintf(
             text,
@@ -810,11 +679,7 @@ static bool show_results(void)
             (long)coefficient_c
         );
 
-        gfx_PrintStringXY(
-            text,
-            12,
-            44
-        );
+        gfx_PrintStringXY(text, 12, 44);
 
         if (!fits) {
             gfx_PrintStringXY(
@@ -859,14 +724,9 @@ static bool show_results(void)
                     100
                 );
 
-                x +=
-                    expressions[0].width + 6;
+                x += expressions[0].width + 6;
 
-                gfx_PrintStringXY(
-                    ",",
-                    x,
-                    100
-                );
+                gfx_PrintStringXY(",", x, 100);
 
                 draw_expression(
                     &expressions[1],
@@ -880,20 +740,14 @@ static bool show_results(void)
                     86
                 );
 
-                if (
-                    expressions[0].width <= 282
-                ) {
+                if (expressions[0].width <= 282) {
                     gfx_PrintStringXY(
                         ",",
                         18 + expressions[0].width,
                         86
                     );
                 } else {
-                    gfx_PrintStringXY(
-                        ",",
-                        12,
-                        116
-                    );
+                    gfx_PrintStringXY(",", 12, 116);
                 }
 
                 draw_expression(
@@ -904,11 +758,7 @@ static bool show_results(void)
             }
         }
 
-        gfx_HorizLine(
-            12,
-            201,
-            296
-        );
+        gfx_HorizLine(12, 201, 296);
 
         gfx_PrintStringXY(
             "ENTER or CLEAR: edit coefficients",
@@ -917,7 +767,7 @@ static bool show_results(void)
         );
 
         gfx_PrintStringXY(
-            "Y=: quit",
+            "Y=: main menu",
             12,
             226
         );
@@ -939,34 +789,207 @@ static bool show_results(void)
     }
 }
 
-int main(void)
+static void run_quadratic_module(void)
 {
-    char fields[3][8] = {
-        "",
-        "",
-        ""
+    unsigned selected = 0;
+
+    for (;;) {
+        if (!input_coefficients(&selected)) {
+            return;
+        }
+
+        solve();
+
+        if (!show_results()) {
+            return;
+        }
+
+        selected = 0;
+    }
+}
+
+static void show_about(void)
+{
+    uint8_t key;
+
+    page("ALGEBRA SUITE / ABOUT");
+
+    gfx_PrintStringXY(
+        "Version " APP_VERSION,
+        12,
+        44
+    );
+
+    gfx_PrintStringXY(
+        "Available in this build:",
+        12,
+        68
+    );
+
+    gfx_PrintStringXY(
+        "Quadratic and linear equations",
+        12,
+        88
+    );
+
+    gfx_PrintStringXY(
+        "Exact fractions and radicals",
+        12,
+        106
+    );
+
+    gfx_PrintStringXY(
+        "Real and complex solutions",
+        12,
+        124
+    );
+
+    gfx_PrintStringXY(
+        "Integer inputs: -1000 to 1000",
+        12,
+        148
+    );
+
+    gfx_PrintStringXY(
+        "No persistent logs or saved inputs.",
+        12,
+        166
+    );
+
+    gfx_PrintStringXY(
+        "More Honors Algebra 2 tools planned.",
+        12,
+        184
+    );
+
+    gfx_HorizLine(12, 207, 296);
+
+    gfx_PrintStringXY(
+        "ENTER, CLEAR, or Y=: main menu",
+        12,
+        220
+    );
+
+    gfx_BlitBuffer();
+
+    do {
+        key = wait_key();
+    } while (
+        key != sk_Enter &&
+        key != sk_Clear &&
+        key != sk_Yequ
+    );
+}
+
+static unsigned main_menu(unsigned selected)
+{
+    static const char *items[] = {
+        "Quadratic / linear solver",
+        "About",
+        "Exit"
     };
 
-    unsigned selected = 0;
+    for (;;) {
+        unsigned i;
+        uint8_t key;
+
+        page("ALGEBRA SUITE");
+
+        gfx_PrintStringXY(
+            "Honors Algebra 2 project",
+            12,
+            44
+        );
+
+        for (i = 0; i < 3; ++i) {
+            int y = 82 + (int)i * 34;
+
+            if (i == selected) {
+                gfx_Rectangle(
+                    8,
+                    y - 8,
+                    304,
+                    27
+                );
+
+                gfx_PrintStringXY(
+                    ">",
+                    16,
+                    y
+                );
+            }
+
+            gfx_PrintStringXY(
+                items[i],
+                34,
+                y
+            );
+        }
+
+        gfx_PrintStringXY(
+            "Version " APP_VERSION,
+            12,
+            185
+        );
+
+        gfx_HorizLine(12, 203, 296);
+
+        gfx_PrintStringXY(
+            "UP/DOWN: select   ENTER: open",
+            12,
+            214
+        );
+
+        gfx_PrintStringXY(
+            "CLEAR or Y=: quit",
+            12,
+            228
+        );
+
+        gfx_BlitBuffer();
+
+        key = wait_key();
+
+        if (key == sk_Up) {
+            selected = (selected + 2) % 3;
+        } else if (key == sk_Down) {
+            selected = (selected + 1) % 3;
+        } else if (key == sk_Enter) {
+            return selected;
+        } else if (
+            key == sk_Clear ||
+            key == sk_Yequ
+        ) {
+            return 2;
+        }
+    }
+}
+
+int main(void)
+{
+    unsigned selection = 0;
     bool running = true;
 
     begin_screen();
 
     while (running) {
-        if (!input_coefficients(
-            fields,
-            &selected
-        )) {
-            break;
+        selection = main_menu(selection);
+
+        switch (selection) {
+            case 0:
+                run_quadratic_module();
+                break;
+
+            case 1:
+                show_about();
+                break;
+
+            default:
+                running = false;
+                break;
         }
-
-        solve();
-
-        running = show_results();
-        selected = 0;
     }
 
     gfx_End();
-
     return 0;
 }
