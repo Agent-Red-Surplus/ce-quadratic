@@ -1,0 +1,33 @@
+name: Build calculator program
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+
+      - name: Install CE compiler on remote runner
+        uses: gavinhsmith/setup-ti84-ce-toolchain@v1
+        with:
+          version: v15.0
+
+      - name: Build program
+        run: make
+
+      - name: Save calculator executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: QSTART-calculator-program
+          path: bin/*.8xp
+          if-no-files-found: error
