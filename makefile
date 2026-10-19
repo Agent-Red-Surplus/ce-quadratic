@@ -1,5 +1,5 @@
-NAME = QGFX
-DESCRIPTION = "Graphics isolation test"
+NAME = QLOG
+DESCRIPTION = "Persistent logging test"
 COMPRESSED = NO
 ARCHIVED = NO
 
