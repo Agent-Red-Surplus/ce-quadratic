@@ -1,5 +1,5 @@
-NAME = QSTART
-DESCRIPTION = "Quadratic native interface test"
+NAME = QCHECK
+DESCRIPTION = "Native execution check"
 COMPRESSED = NO
 ARCHIVED = NO
 
