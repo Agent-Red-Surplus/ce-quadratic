@@ -5,8 +5,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <math.h>
 
-#define APP_VERSION "0.4.1"
+#define APP_VERSION "0.4.2"
 #define LIMIT 1000L
 #define CARD_MAX 96
 
@@ -18,7 +19,7 @@ typedef struct {
 } expression_t;
 typedef struct { char title[48],note[160],math[2][128]; } work_card_t;
 static int32_t coefficient_a,coefficient_b,coefficient_c;
-static char fields[3][8]={"","",""};
+static char fields[3][32]={"","",""};
 static root_t roots[2];
 static unsigned root_count,card_count;
 static bool all_numbers,repeated,card_overflow;
@@ -93,35 +94,89 @@ static bool parse_number(const char *s,int32_t *v){int32_t m=0;unsigned i=0;bool
     *v=neg?-m:m;return true;
 }
 static int digit_key(uint8_t k){switch(k){case sk_0:return 0;case sk_1:return 1;case sk_2:return 2;case sk_3:return 3;case sk_4:return 4;case sk_5:return 5;case sk_6:return 6;case sk_7:return 7;case sk_8:return 8;case sk_9:return 9;default:return -1;}}
+
+/* Coefficient input: signed integer, p/q, sqrt(n), p*sqrt(n)/q. */
+typedef struct { int32_t p,q; double value; bool irrational; } input_value_t;
+static input_value_t entered[3];
+static bool radical_coefficients;
+static bool input_uint(const char **cursor,int32_t *v){
+    const char *s=*cursor;int32_t n=0;
+    if(*s<'0'||*s>'9')return false;
+    while(*s>='0'&&*s<='9'){n=n*10+*s++-'0';if(n>1000)return false;}
+    *v=n;*cursor=s;return true;
+}
+static bool parse_coefficient(const char *text,input_value_t *out){
+    const char *s=text;int sign=1;int32_t p=1,q=1,n=1,t;bool rad=false,has_number=false;
+    if(!*s){out->p=0;out->q=1;out->value=0;out->irrational=false;return true;}
+    if(*s=='-'||*s=='+'){if(*s=='-')sign=-1;++s;}
+    if(*s>='0'&&*s<='9'){if(!input_uint(&s,&p))return false;has_number=true;}
+    if(*s=='*'){if(!has_number)return false;++s;if(strncmp(s,"sqrt(",5))return false;}
+    if(!strncmp(s,"sqrt(",5)){
+        rad=true;s+=5;if(!input_uint(&s,&n)||*s++!=')')return false;
+    }else if(!has_number)return false;
+    if(*s=='/'){++s;if(*s=='-'||*s=='+'){if(*s=='-')sign=-sign;++s;}
+        if(!input_uint(&s,&q)||!q)return false;}
+    if(*s)return false;
+    out->value=(double)(sign*p)*sqrt((double)n)/(double)q;
+    out->irrational=false;
+    if(rad){for(t=0;t*t<n;++t){}if(t*t==n)p*=t;else if(p&&n)out->irrational=true;}
+    out->p=sign*p;out->q=q;
+    if(!out->irrational){t=gcd32(out->p,q);out->p/=t;out->q/=t;}
+    return true;
+}
+static bool normalize_coefficients(void){
+    int i;int32_t common=1,g;int64_t v[3],wide;
+    radical_coefficients=false;
+    for(i=0;i<3;++i){if(!parse_coefficient(fields[i],&entered[i]))return false;
+        if(entered[i].irrational)radical_coefficients=true;}
+    if(radical_coefficients)return true;
+    for(i=0;i<3;++i){g=gcd32(common,entered[i].q);wide=(int64_t)(common/g)*entered[i].q;
+        if(wide>100000000L)return false;common=(int32_t)wide;}
+    for(i=0;i<3;++i)v[i]=(int64_t)entered[i].p*(common/entered[i].q);
+    /* Reduce in 64 bits before checking the legacy exact solver's bound. */
+    {int64_t content=0,a,b,t;for(i=0;i<3;++i){a=content;b=v[i]<0?-v[i]:v[i];
+        while(b){t=a%b;a=b;b=t;}content=a;}
+        if(!content)content=1;
+        for(i=0;i<3;++i){v[i]/=content;if(v[i]<-LIMIT||v[i]>LIMIT)return false;}}
+    coefficient_a=(int32_t)v[0];coefficient_b=(int32_t)v[1];coefficient_c=(int32_t)v[2];
+    return true;
+}
+static void input_append(char *field,const char *text,bool *replace){
+    size_t n;if(*replace){field[0]='\0';*replace=false;}
+    n=strlen(field);if(n+strlen(text)<sizeof(fields[0]))strcat(field,text);
+}
 static bool input_coefficients(void){
-    unsigned selected=0;bool replace=true;const char *note="Type to replace. Blank field = 0.";
+    unsigned selected=0;bool replace=true;const char *note="Integers, fractions, p*sqrt(n)/q";
     for(;;){char s[64];unsigned i;uint8_t k;char *field;size_t len;int digit;
-        page("ALGEBRA / QUADRATIC + LINEAR");gfx_PrintStringXY("A*x^2 + B*x + C = 0",12,42);
-        gfx_PrintStringXY("Integer coefficients: -1000 to 1000",12,59);
-        for(i=0;i<3;++i){int y=84+(int)i*30;const char *v=fields[i][0]?fields[i]:"0";
-            snprintf(s,sizeof(s),"%c = %s",(char)('A'+i),v);
-            if(i==selected){gfx_Rectangle(8,y-7,304,25);gfx_PrintStringXY(">",16,y);if(replace)gfx_HorizLine(60,y+11,gfx_GetStringWidth(v));}
-            gfx_PrintStringXY(s,28,y);
-        }
-        gfx_PrintStringXY(note,12,173);gfx_HorizLine(12,188,296);
-        gfx_PrintStringXY(selected==2?"ENTER Solve     UP/DOWN Select":"ENTER Next      UP/DOWN Select",12,199);
-        gfx_PrintStringXY("DEL Erase       CLEAR Clear field",12,212);
-        gfx_PrintStringXY("(-) Sign    GRAPH Solve    Y= Menu",12,225);gfx_BlitBuffer();
+        page("ALGEBRA / COEFFICIENT INPUT");gfx_PrintStringXY("A*x^2 + B*x + C = 0",12,42);
+        gfx_PrintStringXY("Each integer component: 0 to 1000",12,58);
+        for(i=0;i<3;++i){int y=80+(int)i*27;
+            snprintf(s,sizeof(s),"%c = %s",(char)('A'+i),fields[i][0]?fields[i]:"0");
+            if(i==selected)gfx_Rectangle(8,y-6,304,23);gfx_PrintStringXY(s,16,y);}
+        gfx_PrintStringXY(note,12,157);
+        gfx_PrintStringXY("x^2: sqrt(   ): close   /: fraction",12,176);
+        gfx_PrintStringXY("*: multiply   (-): leading sign",12,190);
+        gfx_PrintStringXY("ENTER Next/Solve   GRAPH Solve",12,204);
+        gfx_PrintStringXY("UP/DOWN Select  DEL Erase",12,218);
+        gfx_PrintStringXY("CLEAR Field   Y= Menu",12,231);gfx_BlitBuffer();
         k=wait_key();field=fields[selected];len=strlen(field);digit=digit_key(k);
         if(k==sk_Yequ)return false;
-        if(k==sk_Up||k==sk_Down){selected=(selected+(k==sk_Up?2:1))%3;replace=true;note="Type to replace. Blank field = 0.";continue;}
-        if(k==sk_Clear){field[0]='\0';replace=false;note="Field cleared. Blank field = 0.";continue;}
-        if(k==sk_Del){if(len)field[len-1]='\0';replace=false;note="Editing: digits append to this field.";continue;}
-        if(k==sk_Chs||k==sk_Sub){if(field[0]=='-')memmove(field,field+1,len);else if(len<6){memmove(field+1,field,len+1);field[0]='-';}replace=false;note="Sign changed. Type digits to append.";continue;}
-        if(digit>=0){int32_t value;if(replace){field[0]='\0';len=0;replace=false;}
-            if(len>=6){note="Maximum magnitude is 1000.";continue;}
-            field[len]=(char)('0'+digit);field[len+1]='\0';
-            if(!parse_number(field,&value)){field[len]='\0';note="Maximum magnitude is 1000.";}else note="Editing: digits append to this field.";continue;}
-        if(k==sk_Enter&&selected<2){++selected;replace=true;note="Type to replace. Blank field = 0.";continue;}
-        if(k==sk_Enter||k==sk_Graph){int32_t v[3];for(i=0;i<3;++i)if(!parse_number(fields[i],&v[i]))break;
-            if(i!=3){selected=i;replace=false;note="Enter digits after the minus sign.";continue;}
-            coefficient_a=v[0];coefficient_b=v[1];coefficient_c=v[2];return true;
-        }
+        if(k==sk_Up||k==sk_Down){selected=(selected+(k==sk_Up?2:1))%3;replace=true;continue;}
+        if(k==sk_Clear){field[0]='\0';replace=false;continue;}
+        if(k==sk_Del){if(len)field[len-1]='\0';replace=false;continue;}
+        if(k==sk_Chs||k==sk_Sub){if(field[0]=='-')memmove(field,field+1,len);
+            else if(len+1<sizeof(fields[0])){memmove(field+1,field,len+1);field[0]='-';}replace=false;continue;}
+        if(digit>=0){char d[2]={(char)('0'+digit),0};input_append(field,d,&replace);continue;}
+        if(k==sk_Square){input_append(field,"sqrt(",&replace);continue;}
+        if(k==sk_RParen){input_append(field,")",&replace);continue;}
+        if(k==sk_Div){input_append(field,"/",&replace);continue;}
+        if(k==sk_Mul){input_append(field,"*",&replace);continue;}
+        if(k==sk_Enter&&selected<2){++selected;replace=true;continue;}
+        if(k==sk_Enter||k==sk_Graph){
+            for(i=0;i<3;++i)if(!parse_coefficient(fields[i],&entered[i]))break;
+            if(i<3){selected=i;replace=false;note="Invalid input: check sqrt() and /0";continue;}
+            if(!normalize_coefficients()){note="Reduced integer coefficients exceed 1000";continue;}
+            return true;}
     }
 }
 
@@ -161,7 +216,7 @@ static void build_work(void){
     int32_t a=coefficient_a,b=coefficient_b,c=coefficient_c,d,m,s=0,f=1,r,i,p,q,g;
     unsigned j;char equation[128],value[128],note[160],h[40],k[40];
     card_count=0;card_overflow=false;format_equation(equation,sizeof(equation));
-    new_card("Start with the equation","Identify the coefficients before substituting.");
+    new_card("Equivalent integer equation","Input fractions and perfect-square roots were reduced. Clearing denominators and common factors preserves the solutions.");
     math_row(0,"%s",equation);math_row(1,"A=%ld, B=%ld, C=%ld",(long)a,(long)b,(long)c);
     if(!a){
         if(!b){new_card(!c?"Every value works":"There is no solution",!c?"This statement is always true.":"This statement is false, whatever x is.");
@@ -369,11 +424,51 @@ static bool show_results(void){
         if(k==sk_Graph&&!show_details())return false;if(k==sk_Trace&&!show_work())return false;
     }
 }
-static void run_module(void){for(;;){if(!input_coefficients())return;solve();build_work();if(!show_work())return;if(!show_results())return;}}
+
+static const char *original_coefficient(unsigned i){return fields[i][0]?fields[i]:"0";}
+static bool show_radical_equation(void){
+    double a=entered[0].value,b=entered[1].value,c=entered[2].value;
+    double d=b*b-4.0*a*c,scale=fabs(b*b)+fabs(4.0*a*c);
+    unsigned selected=0;uint8_t key;
+    for(;;){char text[128];page(selected?"RADICALS / NUMERICAL ROOTS":"RADICALS / EXACT FORMULA");
+        if(!selected){
+            gfx_PrintStringXY("A, B, C below mean your exact inputs:",12,42);
+            snprintf(text,sizeof(text),"A=%s",original_coefficient(0));gfx_PrintStringXY(text,12,60);
+            snprintf(text,sizeof(text),"B=%s",original_coefficient(1));gfx_PrintStringXY(text,12,76);
+            snprintf(text,sizeof(text),"C=%s",original_coefficient(2));gfx_PrintStringXY(text,12,92);
+            if(a!=0){gfx_PrintStringXY("D = B^2 - 4*A*C",12,120);
+                gfx_PrintStringXY("x1 = (-B + sqrt(D))/(2*A)",12,142);
+                gfx_PrintStringXY("x2 = (-B - sqrt(D))/(2*A)",12,160);
+                gfx_PrintStringXY("Negative D: sqrt(D)=i*sqrt(-D)",12,182);
+            }else if(b!=0)gfx_PrintStringXY("Exact solution: x = -C/B",12,132);
+            else gfx_PrintStringXY(c==0?"All complex numbers":"No solution",12,132);
+            gfx_PrintStringXY("Exact formula; radicals not simplified.",12,202);
+        }else{
+            gfx_PrintStringXY("APPROXIMATIONS, not exact fractions",12,44);
+            if(a==0){if(b!=0){snprintf(text,sizeof(text),"x ~= %.10g",-c/b);gfx_PrintStringXY(text,12,82);}
+                else gfx_PrintStringXY(c==0?"All complex numbers":"No solution",12,82);
+            }else if(fabs(d)<=1e-12*scale&&scale!=0){
+                gfx_PrintStringXY("D too near zero for reliable numeric",12,82);
+                gfx_PrintStringXY("classification. Use exact formula.",12,100);
+            }else if(d<0){
+                snprintf(text,sizeof(text),"Real part ~= %.10g",-b/(2*a));gfx_PrintStringXY(text,12,82);
+                snprintf(text,sizeof(text),"Imag part: +/- %.10g i",sqrt(-d)/(2*fabs(a)));gfx_PrintStringXY(text,12,106);
+            }else{double q=-0.5*(b+copysign(sqrt(d),b));double x1=q/a,x2=q!=0?c/q:0;
+                snprintf(text,sizeof(text),"x1 ~= %.10g",x1);gfx_PrintStringXY(text,12,82);
+                snprintf(text,sizeof(text),"x2 ~= %.10g",x2);gfx_PrintStringXY(text,12,106);}
+            gfx_PrintStringXY("Use LEFT for the exact symbolic form.",12,182);
+        }
+        gfx_HorizLine(12,216,296);gfx_PrintStringXY("LEFT/RIGHT Page  ENTER Edit  Y= Menu",12,230);gfx_BlitBuffer();
+        key=wait_key();if(key==sk_Yequ)return false;
+        if(key==sk_Enter||key==sk_Clear)return true;
+        if(key==sk_Left||key==sk_Right||key==sk_Trace||key==sk_Graph)selected=1-selected;
+    }
+}
+static void run_module(void){for(;;){if(!input_coefficients())return;if(radical_coefficients){if(!show_radical_equation())return;continue;}solve();build_work();if(!show_work())return;if(!show_results())return;}}
 static void show_about(void){uint8_t k;page("ALGEBRA SUITE / ABOUT");
     gfx_PrintStringXY("Version " APP_VERSION,12,44);gfx_PrintStringXY("Quadratic and linear equations",12,67);
     gfx_PrintStringXY("One algebra step per work screen",12,87);gfx_PrintStringXY("Typeset fractions and radical bars",12,107);
-    gfx_PrintStringXY("Vertex, axis, classification",12,127);gfx_PrintStringXY("Integer inputs: -1000 to 1000",12,150);
+    gfx_PrintStringXY("Vertex, axis, classification",12,127);gfx_PrintStringXY("Fraction and sqrt coefficient inputs",12,150);
     gfx_PrintStringXY("No persistent logs or saved inputs.",12,174);gfx_HorizLine(12,207,296);gfx_PrintStringXY("ENTER/CLEAR/Y=: main menu",12,220);gfx_BlitBuffer();
     do{k=wait_key();}while(k!=sk_Enter&&k!=sk_Clear&&k!=sk_Yequ);
 }
