@@ -1,5 +1,5 @@
-NAME = QFORM
-DESCRIPTION = "Exact answer display test"
+NAME = QUADAPP
+DESCRIPTION = "Exact quadratic solver"
 COMPRESSED = NO
 ARCHIVED = NO
 
